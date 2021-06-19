@@ -1,0 +1,559 @@
+  
+'
+'        ## Swedish University of Agricultural Sciences ##
+'        ## Department of Forest Ecology and Management ##
+'
+'     CRBasic script designed to collect: (a) raw temperature data to estimate sap flux density
+'                                         (b) average temperatures before and after the pulse
+'                                         (c) maximum temperatures after the pulse
+'
+'
+'      
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+' 
+'  Sections of the script can be commented out if no raw data is needed
+'  
+'
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'
+'
+'                  Author: GUTIERREZ-LOPEZ, Jose. Jan 26, 2019
+'                  Last modified: Feb 03, 2020. 
+'                  Columns added for new sensors
+'                  Written at the Ecohydrology Laboratory, University of New Hampshire 
+'                  Software: Loggernet 4.5 
+'                  Questions: gutloja@gmail.com
+'
+'     Method (a, b): Heat Ratio (Burguess et al 2001 Tree Physiology 21: 589-598)
+'     Method (c): Maximum heat ratio (Gutierrez Lopez et al, under review)
+'
+'      Hardware:
+'            CR6 Series Datalogger
+'            AM16/32 Multiplexor in 4x16 mode
+'
+'            Custom-made relay circuit
+'
+'
+'     Probes:
+'
+'         HPV-06 Edaphic Scientific Sensors        
+'             Two probes with two thermistors each
+'               Outer = 1.0 cm
+'               Inner = 2.0 cm
+'                  [Measured from the end of the epoxy]
+'               One 3 cm coiled nichrome heater (confirm ?)
+'
+'
+'
+'             ## WIRING ##
+'
+'     Data logger -> multiplexor MRM
+'        Power Out G -> G, Power Out 12V -> 12V, U2 -> RES, U1 -> CLK
+'        U3 -> COM ODD H, U4 -> COM ODD L, U5 -> COM EVEN H, U6 -> COMO EVEN L
+'
+'
+'     Data logger -> relay(East Sensors 2005 model)
+'        Power out 12 V -> B, Power out G -> G (left of B)
+'        U8 -> C, G -> G
+'
+'     Sensor -> multiplexor
+'
+'     Grey -> SE1, Blue -> SE2, Black -> Ground, Green -> SE3, White -> SE4  [Continue sequence with all sensors]
+'     Red -> U7
+'      
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'    Personal comments: 
+'      January 26, 2019
+'                          This is a preliminary script. I needs to be fully tested before deployment
+'                          Ignore sections that use 'thermocouple'. This script reads thermistors                   
+'
+'      February 16, 2019
+'                          I decided to read the ratios of all thermistors, and not convert to temperature online
+'
+'      January 3, 2020 
+'                          I added a script to collect data for thermal properties
+'
+'      March 23, 2021      This is a very old version. The one used to collect data for the manuscript. Improved versions are available
+'
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+' Uncomment below if station name is needed
+'StationName SiteOne
+
+'Definition of constants to be used in the program.
+
+
+Const Sample_Int_HPM = 120            ' How often temperature measurements will be taken. In minutes
+Const Sample_Int_TP = 240             ' How often data for thermal properties will be recorded. In Minutes
+'Const TP_Table_Int =   180           ' How oten temperature measurements for thermal properties will be taken. In minutes
+Const T_BP = 20                      ' Sample period before heat pulse. In seconds
+Const T_HR = 60                      ' Begining of range for traditional HRM
+Const T_HREND = 100                  ' End of range for traditional HRM  
+Const T_Pulse = 8000                 ' Pulse time. In milliseconds
+Const T_Pulse_TP = 8000              ' Pulse time of thermal properties. In milliseconds
+Const Delay_TC = 100                 ' Delay between thermistor measurements. In milliseconds
+Const HPM_Table_Int = 120             ' How often are differential voltage measurements stored. In minutes
+Const NoTherm = 48                   ' Number of Thermistors to measure. Make sure it is a multiple of two
+Const RunAve = 2                     ' Number of N for running average
+Const MA = 48                        ' Number of running averages to estimate, one per temperature sensor, four per sensor set
+Const NoBanks = 12                   ' Number of banks to read in the multiplexor
+
+Const par_A = 0.001129221583         ' Steinhar-Hart parameter
+Const par_B = 0.000234113834         ' Steinhar-Hart parameter
+Const par_C = 0.0000000877132623     ' Steinhar-Hart parameter
+Const th_ref_res = 24900             ' Reistance of reference sensor for Half Bridge measurements
+
+
+'Declaration of variables and units
+
+
+Dim i
+Public tempo(NoTherm)
+Public ja
+Public Batt_V
+Public Pan_T
+Public Time(9) 
+Public Therm_C(NoTherm)
+Public TMA(NoTherm)
+Public TAP(NoTherm)
+Public Therm0(NoTherm)
+Public Therm0_60(NoTherm)
+Public Therm60_100(NoTherm)
+Public ti
+Public LCount
+Public th_res(NoTherm)
+Public th_temp(NoTherm)
+Public TC_1
+Public TC_2
+Public k 
+
+              
+Alias Time(1) = Year         'assign the alias Year to rTime(1)
+Alias Time(2) = Month        'assign the alias Month to rTime(2)
+Alias Time(3) = DOM          'assign the alias DOM to rTime(3)
+Alias Time(4) = Hour         'assign the alias Hour to rTime(4)
+Alias Time(5) = Minute       'assign the alias Minute to rTime(5)
+Alias Time(6) = Second       'assign the alias Second to rTime(6)
+Alias Time(7) = uSecond      'assign the alias uSecond to rTime(7)
+Alias Time(8) = WeekDay      'assign the alias WeekDay to rTime(8)
+Alias Time(9) = Day_of_Year  'assign the alias Day_of_Year to rTime(9)
+
+
+
+' Units to be used in the program
+
+Units Batt_V=Volts
+Units Pan_T=degC
+Units Time = s
+Units Therm_C=DegC
+Units TMA=DegC
+Units TAP=DegC
+Units Therm0=Unitless
+Units Therm0_60=Unitless
+Units Therm60_100=Unitless
+Units th_temp = DegC 
+Units TC_1 = DegC
+Units TC_2 = DegC
+
+
+
+'Tables and data resolution. 
+
+'Activate this table if raw data is needed. Also activate the 'CallTable' instructions 
+
+
+
+DataTable(Siteone_RAW,True,-1)
+  CardOut (0 ,-1 )
+  'DataInterval(0,HPM_Table_Int,min,0) 
+  Sample(1, Pan_T,IEEE4)
+  Sample(9, Time(), FP2)
+  Sample(NoTherm,Therm_C(),IEEE4)
+EndTable
+
+
+DataTable(SiteOne_HR,True,-1)
+  CardOut (0 ,-1 )
+  DataInterval(0,HPM_Table_Int,min,0)
+  Sample(9, Time(), FP2)
+  Sample(1, Pan_T, FP2)
+  Sample (1,TC_1, IEEE4)
+  Sample (1,TC_2, IEEE4)
+  Sample(NoTherm,Therm0(),IEEE4)
+  Sample(NoTherm,Therm60_100(),IEEE4)
+
+EndTable
+
+
+
+DataTable(SiteOne_MHR,True,-1)
+  CardOut (0 ,-1 )
+  DataInterval(0,HPM_Table_Int,min,0)
+   Sample(9, Time(), FP2)
+  Sample(1, Pan_T, IEEE4)
+  Sample (1,TC_1, IEEE4)
+  Sample (1,TC_2, IEEE4)
+  Sample (NoTherm, Therm0(),IEEE4)
+  Maximum (NoTherm,TMA(),IEEE4,False,False)
+EndTable
+
+DataTable(SiteOne_TP,True,-1)
+  DataInterval(0,HPM_Table_Int,min,0)
+   Sample(9, Time(), FP2)
+  CardOut (0 ,-1 )
+  Sample(1, Pan_T, FP2)
+  Sample (1,TC_1, IEEE4)
+  Sample (1,TC_2, IEEE4)
+  Sample(NoTherm,Therm_C(),IEEE4)
+
+EndTable
+
+
+' # Begin main program to read all thermistors before the heat pulse #
+
+BeginProg
+
+  Scan (Sample_Int_HPM,min,1,0)
+    
+''Instructions to read thermal properties (every 90 minutes)
+
+      
+    If IfTime(0,Sample_Int_TP,min) Then
+
+                  Battery(Batt_V )
+                  'Default Wiring Panel Temperature measurement 'PTemp_C'
+                  PanelTemp(Pan_T,_50Hz)
+
+                  ti = Timer(1,Sec,2)                 
+                  Do
+                          
+                          ti = Timer(1,Sec,4)
+                          If ti < T_BP Then
+                                  ' Battery(Batt_V)
+                                  RealTime(Time())
+                                  PanelTemp(Pan_T,_50Hz)
+                                  PortSet (U2,1)
+                                  Delay(0,100,mSec)
+                                  LCount=1
+                                  SubScan(0,uSec,NoBanks)
+                                    'Switch to next AM16/32 Multiplexer channel
+                                    PulsePort(U1,5000)
+
+                                    'BridgeHalf measurement to estimate ratio of thermistors
+                                
+                                    BrHalf (Therm_C(LCount),4,mV5000,U3,U7,4,2500,False,200,50,1.0,0)
+                                    
+                                   LCount=LCount+4
+		                              	
+                                  NextSubScan
+                                  PortSet(U2,0) 'Turn AM16/32 Multiplexer Off
+
+
+                                  CallTable (SiteOne_TP) 'Activate if you need raw data
+
+
+                          Else
+                              Exit Do
+                          EndIf
+                          
+                  Loop
+
+
+                          ti = Timer(1,Sec,3)
+                          
+
+
+      ' # Begin instruction to turn on the relays and the heaters #
+      ' First, turn on the SW12 1 Channel 
+         SW12(1,1,0)
+
+        ExciteV (U8,2500,T_Pulse_TP*1000)          'Turn on relays
+        
+         SW12(1,0,0)
+
+      ' # Begin sequence to read all thermsitors after the heat pulse #
+
+
+                  ti = Timer(1,Sec,2)
+                  Do
+                                
+
+
+                                
+                                ti = Timer(1,Sec,4)
+                                If ti < T_HREND Then
+
+                                ' Battery(Batt_V)
+                                PanelTemp(Pan_T,_50Hz)
+                                RealTime(Time())
+          
+                                PortSet (U2,1)
+                                Delay(0,100,mSec)
+                                LCount=1
+                                SubScan(0,uSec,NoBanks)
+                                    'Switch to next AM16/32 Multiplexer channel
+                                    PulsePort(U1,5000)
+            
+                                    'BridgeHalf measurement to estimate ratio of thermistors
+
+                                     BrHalf (Therm_C(LCount),4,mV5000,U3,U7,4,2500,False,200,50,1.0,0)
+                                      LCount=LCount+4 
+                        
+
+                                NextSubScan
+                                PortSet(U2,0) 'Turn AM16/32 Multiplexer Off
+         
+                                 ' Uncomment if raw data is needed
+                                  CallTable (SiteOne_TP)
+
+
+
+          Exit Do
+
+
+        EndIf
+      Loop
+
+
+
+
+
+      ti = Timer(1,Sec,3)
+
+Else 
+  EndIf
+
+    
+' Raw data for sap flow measurements
+
+    If IfTime(0,Sample_Int_HPM,min)  Then
+
+                  Battery(Batt_V )
+                  'Default Wiring Panel Temperature measurement 'PTemp_C'
+                  PanelTemp(Pan_T,_50Hz)
+
+                  For i=1 To NoTherm
+                    tempo(i) = 0
+                    Therm0(i) = 0
+
+                  Next i
+
+                  ja = 0
+
+              
+                  ti = Timer(1,Sec,2)
+
+                  Do
+                          
+                          ti = Timer(1,Sec,4)
+                          If ti < T_BP Then
+                                  ' Battery(Batt_V)
+                
+                                  PanelTemp(Pan_T,_50Hz)
+                                  RealTime(Time())
+                                  PortSet (U2,1)
+                                  Delay(0,100,mSec)
+                                  LCount=1
+                                  SubScan(0,uSec,NoBanks)
+                                    'Switch to next AM16/32 Multiplexer channel
+                                    PulsePort(U1,5000)
+
+                                    'BridgeHalf measurement to estimate ratio of thermistors
+                                
+                                    BrHalf (Therm_C(LCount),4,mV5000,U3,U7,4,2500,False,200,50,1.0,0)
+                                    
+                                   LCount=LCount+4
+           
+		                              	
+                                  NextSubScan
+                                  PortSet(U2,0) 'Turn AM16/32 Multiplexer Off
+
+                                  CallTable (SiteOne_RAW) 'Activate if you need raw data
+
+                                   For i=1 To NoTherm
+                                   tempo(i) = tempo(i) + Therm_C(i)
+                                   Next i
+                                   ja = ja + 1
+
+                                        For i=1 To NoTherm
+                                        Therm0(i) = tempo(i) / ja
+                                        Next i
+
+
+                          Else
+                              Exit Do
+                          EndIf
+                          
+                  Loop
+
+
+                          ti = Timer(1,Sec,3)
+                          
+
+
+      ' # Begin instruction to turn on the relays and the heaters #
+      ' First, turn on the SW12 1 Channel 
+         SW12(1,1,0)
+
+        ExciteV (U8,2500,T_Pulse*1000)          'Turn on relays
+        
+         SW12(1,0,0)
+
+      ' # Begin sequence to read all thermsitors after the heat pulse #
+
+
+      For i=1 To NoTherm
+        tempo(i) = 0
+        Therm0_60(i) = 0
+
+      Next i
+
+      ja = 0
+
+
+
+                  ti = Timer(1,Sec,2)
+                  Do
+                                
+
+
+                                
+                                ti = Timer(1,Sec,4)
+                                If ti < T_HR Then
+
+                                ' Battery(Batt_V)
+                                PanelTemp(Pan_T,_50Hz)
+                                RealTime(Time())
+          
+          
+                                PortSet (U2,1)
+                                Delay(0,100,mSec)
+                                LCount=1
+                                SubScan(0,uSec,NoBanks)
+                                    'Switch to next AM16/32 Multiplexer channel
+                                    PulsePort(U1,5000)
+            
+                                    'BridgeHalf measurement to estimate ratio of thermistors
+
+                                     BrHalf (Therm_C(LCount),4,mV5000,U3,U7,4,2500,False,200,50,1.0,0)
+                                      LCount=LCount+4 
+                        
+
+                                NextSubScan
+                                PortSet(U2,0) 'Turn AM16/32 Multiplexer Off
+         
+                                 ' Uncomment if raw data is needed
+                                  CallTable (Siteone_RAW)
+
+
+          For i=1 To NoTherm
+            tempo(i) = tempo(i) + TMA(i)
+          Next i
+          ja = ja + 1
+
+          For i=1 To NoTherm
+            Therm0_60(i) = tempo(i) / ja
+          Next i
+
+
+          Exit Do
+
+
+        EndIf
+      Loop
+
+
+
+
+
+      ti = Timer(1,Sec,3)
+
+
+
+
+
+      For i=1 To NoTherm
+        tempo(i) = 0
+        Therm60_100(i) = 0
+
+      Next i
+
+      ja = 0
+
+
+
+      ti = Timer(1,Sec,2)
+      Do
+        ti = Timer(1,Sec,4)
+        If ti < T_HREND Then
+          ' Battery(Batt_V)
+          PanelTemp(Pan_T,_50Hz)
+          RealTime(Time())
+          PortSet (U2,1)
+          Delay(0,100,mSec)
+          LCount=1
+          SubScan(0,uSec,NoBanks)
+            'Switch to next AM16/32 Multiplexer channel
+            PulsePort(U1,5000)
+
+                                  'BridgeHalf measurement to estimate ratio of thermistors
+
+                                   BrHalf (Therm_C(LCount),4,mV5000C,U3,U7,4,2500,False,200,50,1.0,0)
+
+
+                                     LCount=LCount+4
+		                                
+                                    
+                        NextSubScan
+          PortSet(U2,0) 'Turn AM16/32 Multiplexer Off
+
+
+         CallTable (Siteone_RAW)
+         
+
+         CallTable (SiteOne_MHR)
+    
+        '  Delay(0,Delay_TC,mSec)
+
+          For i=1 To NoTherm
+            tempo(i) = tempo(i) + TMA(i)
+          Next i
+          ja = ja + 1
+
+
+          For i=1 To NoTherm
+            Therm60_100(i) = tempo(i) / ja
+          Next i
+
+
+
+
+        Else
+          Exit Do
+
+
+        EndIf
+      Loop
+      ti = Timer(1,Sec,3)
+
+
+
+    Else
+
+
+
+    EndIf
+
+
+
+CallTable (SiteOne_HR)
+
+CallTable (Siteone_RAW)  'Uncomment if you need raw data
+
+
+  NextScan
+
+
+
+EndProg

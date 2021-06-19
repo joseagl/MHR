@@ -1,0 +1,408 @@
+'                   ## UNIVERSITY OF NEW HAMPSHIRE ##
+'         ~Department of Natural Resources and the Environment~
+'     Code to collect: (a) Heat ratios for HRM (Burgess et al, 2001)
+'                      (b) Heat ratios for MHR (in review)
+'                      (c) HMP45 RH and air Temperature data
+'                      (d) S5 C soil moisture sensor (in case you need sapwood volumetric water content)
+'
+'
+'                  Author: GUTIERREZ-LOPEZ, Jose. Feb 16, 2018
+'                  Questions: gutloja@gmail.com
+'     Method (a): Heat Ratio (Burguess et al 2001 Tree Physiology 21: 589-598)
+'     Method (b): Maximum heat ratio (in review)
+'
+'      Hardware:
+'            CR1000 Series Datalogger
+'            AM16/32B Multiplexor in 4x16 mode
+'
+'            Custom-made relay circuit
+'
+'
+'     Probes:
+'      MHR
+'             Two probes with three Type-T thermocouples
+'               Outer = 0.5cm
+'               Middle = 1.75cm
+'               Inner = 3cm
+'                  [Measured from the end of the epoxy]
+'             One 4cm coiled nichrome heater
+'
+'
+'
+'             ## WIRING ##
+'
+'
+'     Data logger -> multiplexor HRM [In 4X 16 Mode]:
+'        SE1 -> ODD H, SE2 -> ODD L, GND* -> GND*, SE3 -> EVEN H, SE4 -> EVEN L
+'        *Must use constantan wire
+'
+'     Data logger -> multiplexor HRM
+'        Power Out G -> G, Power Out 12V -> 12V, COM Tx C1 -> RES, COM Rx C2 -> CLK
+'
+'
+'     Data logger -> relay
+'        Power out 12V -> 12 V IN, Power out G -> G IN, VX1 -> C+, G -> C-
+'
+'
+'
+'    'HMP45 Temperature & Relative Humidity Sensor
+'
+'              YELLOW = SE5
+'              BLUE = SE6
+'              CLEAR = (Ground)
+'              BLACK = (Ground)
+'              WHITE = (Ground)
+'              RED = SW-12
+'
+'
+'      
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'
+'
+'      Personal comments: Script works, but I need to fix the shitty running average, keeps messing things up [pusha vida]
+'                         
+'
+'  
+
+StationName ForestPatchInterior
+
+'Definition of constants to be used in the program.
+
+
+Const Sample_Int_HPM = 15            ' How often temperature measurements will be taken. In minutes
+Const T_BP = 20                      ' Sample period before heat pulse. In seconds
+Const T_HR = 60                      ' Beginning of range for traditional HRM
+Const T_HREND = 100                  ' End of range for traditional HRM  
+Const T_Pulse = 3000                 ' Pulse time. In milliseconds
+Const Delay_TC = 100                 ' Delay between thermocouple measurements. In milliseconds
+Const HPM_Table_Int = 15             ' How often are differential voltage measurements stored. In minutes
+Const NoSETC = 40                    ' Number of SE measurements. Make sure it is a multiple of four
+Const RunAve = 5                     ' Number of N for running average
+Const MA = 40                        ' Number of running averages to estimate, one per temperature sensor, six per sensor set
+Const Subset = 10                    ' Number of banks to read
+
+'Declaration of variables and units
+
+Dim s
+Dim i
+Public tempo(NoSETC)
+Public ja
+Public Batt_V
+Public Pan_T
+Public T(NoSETC)
+Public TMA(NoSETC)
+Public TAP(NoSETC)
+Public Delta0(NoSETC)
+Public Delta0_60(NoSETC)
+Public Delta60_100(NoSETC)
+Public ti
+Public LCount
+Public VWC
+
+Public AirTC
+Public RH
+
+
+
+' Units to be used in the program
+
+Units Batt_V=Volts
+Units Pan_T=degC
+Units T=DegC
+Units TMA=DegC
+Units TAP=DegC
+Units Delta0=DegC
+Units Delta0_60=DegC
+Units Delta60_100=DegC
+
+Units AirTC=Deg C
+Units RH=%
+
+
+
+'Tables and data resolution. 
+
+'Activate this table if raw data is needed. Also activate the 'CallTable' instructions 
+
+'DataTable(June6HPM,True,-1)
+  'DataInterval(0,HPM_Table_Int,min,0) 
+ ' Sample(1, Pan_T, FP2)
+ ' Sample(NoSETC,TMA(),FP2)
+'EndTable
+
+
+DataTable(FlowDirJan19HRM,True,-1)
+  DataInterval(0,HPM_Table_Int,min,0)
+  Sample(1, Pan_T, FP2)
+  Sample(1,VWC,FP2)
+  Sample(NoSETC,Delta0(),FP2)
+' Sample(NoSETC,Delta0_60(),FP2)
+  Sample(NoSETC,Delta60_100(),FP2)
+  Sample(1,AirTC,FP2)
+  Sample(1,RH,FP2)
+EndTable
+
+DataTable(FlowDirJan19MHR,True,-1)
+  DataInterval(0,HPM_Table_Int,min,0)
+  Sample(1, Pan_T, FP2)
+  Maximum (NoSETC,TMA(),FP2,False,True)
+  Maximum (NoSETC,T(),FP2,False,True)
+  Sample(1,AirTC,FP2)
+  Sample(1,RH,FP2)
+EndTable
+
+
+' # Begin main program to read all thermocouples before the heat pulse #
+
+BeginProg
+
+  Scan (1 ,sec,1,0)
+
+    If IfTime(0,Sample_Int_HPM,min)  Then
+      
+
+	              	BrHalf(VWC,1,mV2500,5,2,1,2500,False,10000,_50Hz,2.975,-0.4)
+
+
+
+             			 PortSet(9,1) 
+				
+				Delay(0, 200, mSec)
+
+	              	'HMP45 Temperature & Relative Humidity Sensor measurements 'AirTC' and 'RH'
+	                  	VoltSe(AirTC,1,mV2500,5,0,0,_50Hz,0.1,-40)
+	                  	VoltSe(RH,1,mV2500,6,0,0,_50Hz,0.1,0)
+	                        	If (RH>100) AND (RH<108) Then RH=100
+	                        	
+
+              			 PortSet(9,0) 
+
+
+                  Battery(Batt_V )
+                  'Default Wiring Panel Temperature measurement 'PTemp_C'
+                  PanelTemp(Pan_T,_60Hz)
+                  
+
+                  For i=1 To NoSETC
+                    tempo(i) = 0
+                    Delta0(i) = 0
+
+                  Next i
+
+                  ja = 0
+
+                  ti = Timer(1,Sec,2)
+                  
+
+                  Do
+                          ti = Timer(1,Sec,4)
+                          If ti < T_BP Then
+                                  ' Battery(Batt_V)
+                
+                                  PanelTemp(Pan_T,_50Hz)
+                                  PortSet (1,1)
+                                  Delay(0,100,mSec)
+                                  LCount=1
+                                  SubScan(0,uSec,Subset)
+                                    'Switch to next AM16/32 Multiplexer channel
+                                    PulsePort(2,5000)
+
+                                    'Generic Single Ended TypeT termocouple
+                                    TCSe (T(LCount),4,mV2_5C,1,TypeT,Pan_T,0,0,_50Hz,1,0)
+
+
+                                    LCount=LCount+4
+                                  NextSubScan
+                                  PortSet(1,0) 'Turn AM16/32 Multiplexer Off
+
+
+
+                                  AvgRun (TMA(), MA,T(),RunAve)
+
+
+
+                                '  CallTable (June6HPM) 'Activate if you need raw data
+
+                                   For i=1 To NoSETC
+                                   tempo(i) = tempo(i) + T(i)
+                                   Next i
+                                   ja = ja + 1
+
+                                        For i=1 To NoSETC
+                                        Delta0(i) = tempo(i) / ja
+                                        Next i
+
+
+                          Else
+                              Exit Do
+                          EndIf
+                          
+                  Loop
+
+
+                          ti = Timer(1,Sec,3)
+                          
+
+
+      ' # Begin instruction to turn on the relays and the heaters #
+
+
+        ExciteV (Vx1,2500,T_Pulse*1000)          'Turn on relays
+
+
+      ' # Begin sequence to read all thermocouples after the heat pulse #
+
+
+      For i=1 To NoSETC
+        tempo(i) = 0
+        Delta0_60(i) = 0
+
+      Next i
+
+      ja = 0
+
+
+
+      ti = Timer(3,Sec,2)
+      Do
+        ti = Timer(3,Sec,4)
+        If ti < T_HR Then
+
+          ' Battery(Batt_V)
+          PanelTemp(Pan_T,_50Hz)
+          PortSet (1,1)
+          Delay(0,100,mSec)
+          LCount=1
+          SubScan(0,uSec,Subset)
+            'Switch to next AM16/32 Multiplexer channel
+            PulsePort(2,5000)
+
+            'Generic Single Ended TypeT termocouple
+            TCSe (T(LCount),4,mV2_5C,1,TypeT,Pan_T,0,0,_50Hz,1,0))
+
+
+            LCount=LCount+4
+          NextSubScan
+          PortSet(1,0) 'Turn AM16/32 Multiplexer Off
+
+
+
+
+         AvgRun (TMA(),MA,T(),RunAve) 
+         
+
+
+        ' CallTable (June6HPM)
+
+
+          For i=1 To NoSETC
+            tempo(i) = tempo(i) + TMA(i)
+          Next i
+          ja = ja + 1
+
+          For i=1 To NoSETC
+            Delta0_60(i) = tempo(i) / ja
+          Next i
+
+
+          Exit Do
+
+
+        EndIf
+      Loop
+
+
+
+
+
+      ti = Timer(3,Sec,3)
+
+
+
+
+
+      For i=1 To NoSETC
+        tempo(i) = 0
+        Delta60_100(i) = 0
+
+      Next i
+
+      ja = 0
+
+
+
+      ti = Timer(4,Sec,2)
+      Do
+        ti = Timer(4,Sec,4)
+        If ti < T_HREND Then
+          ' Battery(Batt_V)
+          PanelTemp(Pan_T,_50Hz)
+          PortSet (1,1)
+          Delay(0,100,mSec)
+          LCount=1
+          SubScan(0,uSec,Subset)
+            'Switch to next AM16/32 Multiplexer channel
+            PulsePort(2,5000)
+
+            'Generic Single Ended TypeT termocouple
+            TCSe (T(LCount),4,mV2_5C,1,TypeT,Pan_T,0,0,_50Hz,1,0))
+
+
+            LCount=LCount+4
+          NextSubScan
+          PortSet(1,0) 'Turn AM16/32 Multiplexer Off
+
+
+         AvgRun (TMA(),MA,T(),RunAve)
+
+         'CallTable (June6HPM)
+         
+
+         CallTable (FlowDirJan19MHR)
+    
+        '  Delay(0,Delay_TC,mSec)
+
+
+
+          For i=1 To NoSETC
+            tempo(i) = tempo(i) + TMA(i)
+          Next i
+          ja = ja + 1
+
+
+          For i=1 To NoSETC
+            Delta60_100(i) = tempo(i) / ja
+          Next i
+
+
+
+
+        Else
+          Exit Do
+
+
+        EndIf
+      Loop
+      ti = Timer(4,Sec,3)
+
+
+
+    Else
+
+
+
+    EndIf
+
+
+
+CallTable (FlowDirJan19HRM)
+'CallTable (June6HPM)  'Uncomment if you need raw data
+
+
+
+  NextScan
+
+
+
+EndProg
